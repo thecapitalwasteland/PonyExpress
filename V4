@@ -1,1 +1,643 @@
 
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pony Express — V4 Rider & Driver</title>
+  <script>
+    // Tailwind dark theme config
+    window.tailwind = { config: { darkMode: 'class' } }
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://unpkg.com">
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <style>
+    :root{ color-scheme: dark; }
+    body { background: #0b0f14; }
+    .leaflet-container { width: 100%; height: 280px; border-radius: 0.75rem; }
+    .glass { background: rgba(255,255,255,0.04); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.06); }
+    .accent-rider { background: #312e81; }   /* Indigo-900 */
+    .accent-driver{ background: #064e3b; }   /* Emerald-900 */
+    .btn { border: 1px solid rgba(255,255,255,.15); border-radius: .75rem; padding: .5rem .75rem; }
+    .btn:hover { background: rgba(255,255,255,.06); }
+  </style>
+</head>
+<body class="text-gray-200">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect, useRef } = React;
+
+    // ---------- utilities ----------
+    const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36).slice(2);
+    function useLocalState(key, initial) {
+      const [value, setValue] = useState(() => {
+        try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : initial; }
+        catch { return initial; }
+      });
+      useEffect(() => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} }, [key, value]);
+      return [value, setValue];
+    }
+    function useLocalUserId(){
+      const [id, setId] = useState(()=>{
+        let x = localStorage.getItem("pe.userId");
+        if(!x){ x = uid(); localStorage.setItem("pe.userId", x); }
+        return x;
+      });
+      return id;
+    }
+    const fmtDate = (s) => { if(!s) return ""; try { return new Date(s + "T12:00:00").toLocaleDateString(); } catch { return s; } };
+    const fmtRange = (a,b) => a && b ? (fmtDate(a) + " → " + fmtDate(b)) : (a ? fmtDate(a) : "");const TRAILER_TYPES = ["Slant","Box stall","Cattle trailer","Straight load"];
+    const RAMP_OPTIONS = ["Ramp required","No ramp required"];
+
+    // In-memory session store for file blobs keyed by fileId (not persisted across reloads)
+    const SessionFiles = { store: {}, put(id, blob){ this.store[id] = blob; }, get(id){ return this.store[id]; }, del(id){ delete this.store[id]; } };
+
+    // -------- Address autocomplete (Nominatim) --------
+    function useAutocomplete(query){
+      const [results, setResults] = useState([]);
+      const [loading, setLoading] = useState(false);
+      useEffect(()=>{
+        const q = (query||"").trim();
+        if(!q){ setResults([]); return; }
+        const ctrl = new AbortController();
+        const id = setTimeout(async ()=>{
+          try{
+            setLoading(true);
+            const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&addressdetails=1`, {
+              headers: { "Accept":"application/json" }, signal: ctrl.signal
+            });
+            if(!resp.ok) throw new Error("net");
+            const data = await resp.json();
+            setResults(data.map(d => ({ label: d.display_name, lat: parseFloat(d.lat), lon: parseFloat(d.lon) })));
+          }catch(e){ /* ignore */ }
+          finally{ setLoading(false); }
+        }, 350); // debounce
+        return ()=>{ clearTimeout(id); ctrl.abort(); };
+      }, [query]);
+      return { results, loading };
+    }
+
+    function AddressInput({ label, value, setValue, ll, setLL }){
+      const [focus, setFocus] = useState(false);
+      const { results, loading } = useAutocomplete(value);
+      return (
+        <label className="text-sm relative">
+          {label}
+          <input
+            value={value}
+            onChange={e=>setValue(e.target.value)}
+            onFocus={()=>setFocus(true)} onBlur={()=>setTimeout(()=>setFocus(false), 150)}
+            placeholder="City, state or full address"
+            className="mt-1 w-full px-3 py-2 rounded-xl glass outline-none"
+          />
+          {(focus && (loading || results.length>0)) && (
+            <div className="absolute z-20 bg-[#0f141b] border border-white/10 rounded-xl w-full mt-1 max-h-56 overflow-auto shadow-sm">
+              {loading && <div className="px-3 py-2 text-xs text-gray-400">Searching…</div>}
+              {results.map((r,i)=>(
+                <button key={i} type="button"
+                  onClick={()=>{ setValue(r.label); setLL([r.lat, r.lon]); }}
+                  className="block w-full text-left px-3 py-2 text-sm hover:bg-white/5"
+                >{r.label}</button>
+              ))}
+            </div>
+          )}
+          {ll && <div className="mt-1 text-[11px] text-gray-400">✔ verified ({ll[0].toFixed(4)}, {ll[1].toFixed(4)})</div>}
+        </label>
+      );
+    }
+
+    // ---------- Map components ----------
+    function MiniMap({ start, end }){
+      const ref = useRef(null);
+      useEffect(()=>{
+        if(!ref.current) return;
+        const map = L.map(ref.current, { scrollWheelZoom:false });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
+        let bounds;
+        if(start){ L.marker(start).addTo(map); bounds = L.latLngBounds([start]); }
+        if(end){ L.marker(end).addTo(map); bounds = bounds ? bounds.extend(end) : L.latLngBounds([end]); }
+        if(start && end){ L.polyline([start, end], { weight: 3 }).addTo(map); }
+        if(bounds){ map.fitBounds(bounds.pad(0.3)); } else { map.setView([31.0, -97.0], 5); }
+        return () => map.remove();
+      }, [start, end]);
+      return <div ref={ref} className="leaflet-container"></div>;
+    }
+
+    function RouteMap({ start, end, onChange }){
+      const ref = useRef(null);
+      useEffect(()=>{
+        if(!ref.current) return;
+        const map = L.map(ref.current);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
+        map.setView([31.0, -97.0], 5);
+        let startMarker = start ? L.marker(start, {draggable:true}).addTo(map) : null;
+        let endMarker = end ? L.marker(end, {draggable:true}).addTo(map) : null;
+        let line = (start && end) ? L.polyline([start, end], { weight:3 }).addTo(map) : null;
+
+        function updateLine(){
+          if(line) { map.removeLayer(line); line=null; }
+          if(startMarker && endMarker){
+            line = L.polyline([startMarker.getLatLng(), endMarker.getLatLng()], { weight:3 }).addTo(map);
+            const b = L.latLngBounds([startMarker.getLatLng(), endMarker.getLatLng()]);
+            map.fitBounds(b.pad(0.3));
+          }
+          onChange(startMarker?startMarker.getLatLng():null, endMarker?endMarker.getLatLng():null);
+        }
+
+        map.on('click', (e)=>{
+          if(!startMarker){
+            startMarker = L.marker(e.latlng, {draggable:true}).addTo(map);
+            startMarker.on('dragend', updateLine);
+          } else if(!endMarker){
+            endMarker = L.marker(e.latlng, {draggable:true}).addTo(map);
+            endMarker.on('dragend', updateLine);
+          } else {
+            map.removeLayer(startMarker); map.removeLayer(endMarker);
+            if(line) { map.removeLayer(line); line=null; }
+            startMarker = L.marker(e.latlng, {draggable:true}).addTo(map);
+            startMarker.on('dragend', updateLine);
+            endMarker = null;
+          }
+          updateLine();
+        });
+
+        return () => map.remove();
+      }, []);
+      return <div ref={ref} className="leaflet-container"></div>;
+    }// ---------- Data models ----------
+    function emptyShipment(ownerId){
+      return {
+        id:null, ownerId,
+        from:"", fromLL:null, to:"", toLL:null,
+        whenMode:"schedule", date:"", dateStart:"", dateEnd:"",
+        horses:1, trailerType:"Slant", ramp:"No ramp required",
+        notes:"", comments:"",
+        files:[], // [{id,name,size,type}]; blob lives in SessionFiles
+        status:"open", bids:[]
+      };
+    }
+    function emptyRoute(ownerId){
+      return {
+        id:null, ownerId,
+        from:"", fromLL:null, to:"", toLL:null,
+        dateStart:"", dateEnd:"",
+        slots:1, trailerType:"Slant", ramp:"No ramp required",
+        notes:""
+      };
+    }
+
+    // Seed demo data
+    function demoSeedShipments(ownerId){
+      const today = new Date();
+      const addDays = (n)=> new Date(today.getTime()+n*86400000).toISOString().slice(0,10);
+      return [
+        { id: uid(), ownerId, from: "Round Top, TX", fromLL:[30.0641,-96.6958], to: "College Station, TX", toLL:[30.628,-96.3344],
+          whenMode:"schedule", dateStart: addDays(6), dateEnd: addDays(8), date:"",
+          horses: 1, trailerType:"Box stall", ramp:"No ramp required", notes: "Quiet gelding, Coggins ready.", comments:"", files:[], status: "open", bids: [] },
+        { id: uid(), ownerId: "other", from: "Katy, TX", fromLL:[29.7858,-95.8245], to: "Tulsa, OK", toLL:[36.154,-95.9928],
+          whenMode:"schedule", dateStart: addDays(13), dateEnd: addDays(16), date:"",
+          horses: 2, trailerType:"Slant", ramp:"Ramp required", notes: "Mare + yearling. Health cert pending.", comments:"", files:[], status: "open", bids: [] },
+      ];
+    }
+    function demoSeedRoutes(ownerId){
+      const today = new Date();
+      const addDays = (n)=> new Date(today.getTime()+n*86400000).toISOString().slice(0,10);
+      return [
+        { id: uid(), ownerId, from:"Houston, TX", fromLL:[29.76,-95.37], to:"Denver, CO", toLL:[39.74,-104.99], dateStart:addDays(5), dateEnd:addDays(7), slots:1, trailerType:"Box stall", ramp:"No ramp required", notes:"1 box-stall open. Overnight in Amarillo." },
+        { id: uid(), ownerId:"other", from:"San Antonio, TX", fromLL:[29.42,-98.49], to:"Atlanta, GA", toLL:[33.75,-84.39], dateStart:addDays(10), dateEnd:addDays(12), slots:2, trailerType:"Slant", ramp:"Ramp required", notes:"Cameras on board." },
+      ];
+    }
+
+    // ---------- App ----------
+    function App(){
+      const userId = useLocalUserId();
+      const [side, setSide] = useLocalState("pe4.side", "rider"); // rider | driver
+      const [shipments, setShipments] = useLocalState("pe4.shipments", demoSeedShipments(userId));
+      const [routes, setRoutes] = useLocalState("pe4.routes", demoSeedRoutes(userId));
+
+      return (
+        <div className="min-h-screen">
+          <TopBar side={side} setSide={setSide} />
+          <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
+            {side === "rider"
+              ? <RiderPanel userId={userId} shipments={shipments} setShipments={setShipments} />
+              : <DriverPanel userId={userId} routes={routes} setRoutes={setRoutes} />}
+          </main>
+          <Footer />
+        </div>
+      );
+    }
+
+    function TopBar({ side, setSide }){
+      const active = "bg-white/10 text-white border-white/20";
+      const inactive = "bg-white/0 text-gray-300 border-white/10 hover:bg-white/5";
+      return (
+        <header className="sticky top-0 z-10 border-b border-white/10 bg-[#0b0f14]/80 backdrop-blur">
+          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={"w-10 h-10 rounded-2xl grid place-items-center text-xl " + (side==='rider'?'accent-rider':'accent-driver')}>🐴</div>
+              <div>
+                <h1 className="font-semibold">Pony Express</h1>
+                <p className="text-[11px] text-gray-400 -mt-0.5">Horse hauling, simplified.</p>
+              </div>
+            </div>
+            <nav className="flex items-center gap-2">
+              <button onClick={()=>setSide('rider')} className={`px-3 py-1 rounded-xl border ${side==='rider'?active:inactive}`}>Rider</button>
+              <button onClick={()=>setSide('driver')} className={`px-3 py-1 rounded-xl border ${side==='driver'?active:inactive}`}>Driver</button>
+            </nav>
+          </div>
+        </header>
+      );
+    }// ---------- Rider ----------
+    function RiderPanel({ userId, shipments, setShipments }){
+      const [showForm, setShowForm] = useState(false);
+      const myShipments = useMemo(()=> shipments.filter(s=>s.ownerId===userId), [shipments, userId]);
+      const [active, setActive] = useState(null);
+
+      function createShipment(draft){
+        const s = { ...draft, id: uid(), ownerId: userId, status:"open", bids:[] };
+        setShipments(prev => [s, ...prev]);
+        setShowForm(false);
+        setActive(s.id);
+      }
+      function acceptBid(shipmentId, bidId) {
+        setShipments(prev => prev.map(s => s.id === shipmentId ? { ...s, status: "booked", acceptedBid: bidId } : s));
+      }
+      function markCompleted(shipmentId) {
+        setShipments(prev => prev.map(s => s.id === shipmentId ? { ...s, status: "completed" } : s));
+      }
+
+      return (
+        <section>
+          <HeaderRow title="Rider" subtitle="Request a haul and track your requests">
+            <button onClick={()=>setShowForm(true)} className="btn">+ Request haul</button>
+          </HeaderRow>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-gray-300">My hauls</h3>
+              {myShipments.length===0 ? <EmptyCard text="No hauls yet. Create your first request."/> : myShipments.map(s => (
+                <div key={s.id} className="rounded-2xl glass p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">📍</span>
+                      <h4 className="font-medium">{s.from} → {s.to}</h4>
+                    </div>
+                    <StatusBadge status={s.status} />
+                  </div>
+                  <p className="text-sm text-gray-400 mt-1">
+                    🗓️ {s.whenMode==="schedule" ? fmtRange(s.dateStart, s.dateEnd) : fmtDate(s.date)} • {s.horses} horse{s.horses>1?"s":""} • {s.trailerType} • {s.ramp}
+                  </p>
+                  {s.notes && <p className="text-sm text-gray-400 mt-1">{s.notes}</p>}
+                  {s.files?.length>0 && (
+                    <div className="mt-2 text-xs text-gray-400">
+                      📎 {s.files.length} file{s.files.length>1?"s":""} attached
+                    </div>
+                  )}
+                  <div className="flex gap-2 mt-3">
+                    <button onClick={()=>setActive(s.id)} className="btn">View</button>
+                    {s.status==="booked" && <button onClick={()=>markCompleted(s.id)} className="btn">Mark completed</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-gray-300">Tips</h3>
+              <div className="rounded-2xl glass p-3 text-sm text-gray-300">
+                Use verified addresses (select from suggestions) and attach Coggins/Health cert PDFs or images. Files stay on your device in this demo.
+              </div>
+            </div>
+          </div>
+
+          {showForm && <RequestForm onCancel={()=>setShowForm(false)} onCreate={createShipment} />}
+          {active && <ShipmentDetail shipment={shipments.find(s=>s.id===active)} onClose={()=>setActive(null)} onAccept={(bid)=>acceptBid(active,bid)} />}
+        </section>
+      );
+    }
+
+    function RequestForm({ onCancel, onCreate }){
+      const [draft, setDraft] = useState(emptyShipment("me"));
+      const [error, setError] = useState("");
+
+      function onFileChange(e){
+        const files = Array.from(e.target.files || []);
+        const allowed = ["image/jpeg","image/png","application/pdf","application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+        const picked = [];
+        for(const f of files){
+          if(!allowed.includes(f.type)){
+            setError("Unsupported file type: " + f.name);
+            continue;
+          }
+          if(f.size > 10*1024*1024){
+            setError("File too large (>10MB): " + f.name);
+            continue;
+          }
+          const id = uid();
+          SessionFiles.put(id, f);
+          picked.push({ id, name: f.name, size: f.size, type: f.type });
+        }
+        if(picked.length){
+          setDraft(d => ({ ...d, files: [...(d.files||[]), ...picked] }));
+          setError("");
+        }
+        e.target.value = "";
+      }
+      function removeFile(id){
+        SessionFiles.del(id);
+        setDraft(d => ({ ...d, files: (d.files||[]).filter(f=>f.id!==id) }));
+      }
+
+      return (
+        <div className="fixed inset-0 bg-black/50 grid place-items-center p-4" role="dialog" aria-modal="true">
+          <div className="rounded-2xl glass w-full max-w-2xl p-4 space-y-3">
+            <h3 className="font-semibold">New haul request</h3>
+            <div className="grid grid-cols-1 gap-3">
+              <AddressInput label="Pickup" value={draft.from} setValue={v=>setDraft({...draft, from:v})} ll={draft.fromLL} setLL={ll=>setDraft({...draft, fromLL: ll})} />
+              <AddressInput label="Dropoff" value={draft.to} setValue={v=>setDraft({...draft, to:v})} ll={draft.toLL} setLL={ll=>setDraft({...draft, toLL: ll})} />
+
+              <div className="text-sm">
+                <span className="font-medium">When</span>
+                <div className="flex flex-wrap gap-4 mt-2 text-sm">
+                  <label className="inline-flex items-center gap-2">
+                    <input type="radio" name="when" checked={draft.whenMode==="now"} onChange={()=>setDraft({...draft, whenMode:"now"})}/>
+                    Request now (single date)
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <input type="radio" name="when" checked={draft.whenMode==="schedule"} onChange={()=>setDraft({...draft, whenMode:"schedule"})}/>
+                    Schedule (date range)
+                  </label>
+                </div>
+              </div>
+
+              {draft.whenMode==="now" && (
+                <label className="text-sm">Date
+                  <input type="date" value={draft.date} onChange={e=>setDraft({...draft, date: e.target.value})} className="mt-1 w-full px-3 py-2 rounded-xl glass"/>
+                </label>
+              )}
+
+              {draft.whenMode==="schedule" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="text-sm">Earliest
+                    <input type="date" value={draft.dateStart} onChange={e=>setDraft({...draft, dateStart: e.target.value})} className="mt-1 w-full px-3 py-2 rounded-xl glass"/>
+                  </label>
+                  <label className="text-sm">Latest
+                    <input type="date" value={draft.dateEnd} onChange={e=>setDraft({...draft, dateEnd: e.target.value})} className="mt-1 w-full px-3 py-2 rounded-xl glass"/>
+                  </label>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="text-sm">Number of horses
+                  <input type="number" min={1} value={draft.horses} onChange={e=>setDraft({...draft, horses: Number(e.target.value)})} className="mt-1 w-full px-3 py-2 rounded-xl glass"/>
+                </label>
+                <label className="text-sm">Trailer type
+                  <select value={draft.trailerType} onChange={e=>setDraft({...draft, trailerType: e.target.value})} className="mt-1 w-full px-3 py-2 rounded-xl glass">
+                    {TRAILER_TYPES.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              <label className="text-sm">Ramp requirement
+                <select value={draft.ramp} onChange={e=>setDraft({...draft, ramp: e.target.value})} className="mt-1 w-full px-3 py-2 rounded-xl glass">
+                  {RAMP_OPTIONS.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </label>
+
+              <label className="text-sm">Notes
+                <textarea value={draft.notes} onChange={e=>setDraft({...draft, notes: e.target.value})} rows={3} placeholder="Health cert/Coggins, loading quirks, water/layover needs…" className="mt-1 w-full px-3 py-2 rounded-xl glass"/>
+              </label>
+
+              <label className="text-sm">Comments
+                <textarea value={draft.comments} onChange={e=>setDraft({...draft, comments: e.target.value})} rows={3} placeholder="Anything else you’d like haulers to know…" className="mt-1 w-full px-3 py-2 rounded-xl glass"/>
+              </label>
+
+              <div className="text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">Upload documents (jpg, png, pdf, docx; ≤10MB each)</span>
+                  <span className="text-[11px] text-gray-400">Files are kept in-session only in this prototype.</span>
+                </div>
+                <input type="file" multiple accept=".jpg,.jpeg,.png,.pdf,.docx" onChange={onFileChange} className="mt-1 block w-full text-xs"/>
+                {error && <div className="text-amber-300 text-xs mt-1">{error}</div>}
+                {draft.files?.length>0 && (
+                  <ul className="mt-2 space-y-1 text-xs">
+                    {draft.files.map(f => (
+                      <li key={f.id} className="flex items-center justify-between glass px-2 py-1 rounded">
+                        <span>{f.name} <span className="text-gray-400">({(f.size/1024/1024).toFixed(2)} MB)</span></span>
+                        <button className="btn" onClick={()=>removeFile(f.id)}>Remove</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div className="text-sm">
+                <p className="font-medium mb-2">Map (optional): click to drop a start and end marker</p>
+                <RouteMap
+                  start={draft.fromLL} end={draft.toLL}
+                  onChange={(start, end)=>setDraft({...draft, fromLL:start, toLL:end})}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={onCancel} className="btn">Cancel</button>
+              <button onClick={()=>{
+                if(!draft.from.trim() || !draft.to.trim()) { alert("Pickup and Dropoff are required"); return; }
+                if(draft.whenMode==='now' && !draft.date) { alert("Please select a date"); return; }
+                if(draft.whenMode==='schedule' && !draft.dateStart) { alert("Please select a date range"); return; }
+                onCreate(draft);
+              }} className="btn">Create</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function ShipmentDetail({ shipment, onClose, onAccept }){
+      const sortedBids = [...(shipment.bids||[])].sort((a,b)=>a.price-b.price);
+      const demo = sortedBids.length? sortedBids : [
+        { id: uid(), hauler:"Blue Star Equine Transport", price: 950, message:"Air-ride, frequent checks." },
+        { id: uid(), hauler:"Coastal Hauls", price: 875, message:"Private stall, ramp." },
+      ];
+      return (
+        <div className="fixed inset-0 bg-black/50 grid place-items-center p-4" role="dialog" aria-modal="true">
+          <div className="rounded-2xl glass w-full max-w-3xl p-4">
+            <div className="flex items-start justify-between">
+              <h3 className="font-semibold">{shipment.from} → {shipment.to}</h3>
+              <button onClick={onClose} className="btn">Close</button>
+            </div>
+            <p className="text-sm text-gray-300 mt-1">
+              🗓️ {shipment.whenMode==="schedule" ? fmtRange(shipment.dateStart, shipment.dateEnd) : fmtDate(shipment.date)}
+              {" • "}{shipment.horses} horse{shipment.horses>1?"s":""} • {shipment.trailerType} • {shipment.ramp}
+            </p>
+            {shipment.notes && <p className="text-sm text-gray-300 mt-2">{shipment.notes}</p>}
+
+            {shipment.files?.length>0 && (
+              <div className="mt-3">
+                <h4 className="font-medium text-sm">Attached files</h4>
+                <ul className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {shipment.files.map(f => (
+                    <li key={f.id} className="glass rounded p-2 flex items-center justify-between">
+                      <span>📎 {f.name}</span>
+                      <span className="text-gray-400">{(f.size/1024/1024).toFixed(2)} MB</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="text-[11px] text-gray-400 mt-1">Files are stored in-session only in this prototype.</div>
+              </div>
+            )}
+
+            <div className="mt-4">
+              <h4 className="font-medium text-sm">Bids</h4>
+              <ul className="mt-2 space-y-2">
+                {demo.map(b => (
+                  <li key={b.id} className="glass rounded p-2 flex items-center justify-between">
+                    <div>
+                      <div className="font-medium">${b.price.toLocaleString()}</div>
+                      <div className="text-xs text-gray-300">{b.hauler}</div>
+                      {b.message && <div className="text-xs text-gray-400">{b.message}</div>}
+                    </div>
+                    {shipment.status==="open" && <button onClick={()=>onAccept(b.id)} className="btn">Accept</button>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function StatusBadge({ status }){
+      const color = status==='open' ? 'border-white/30 bg-white/5' : status==='booked' ? 'border-amber-300/40 bg-amber-300/10' : 'border-emerald-300/40 bg-emerald-300/10';
+      return <span className={`text-[11px] px-2 py-1 rounded-full border ${color}`}>{status}</span>;
+    }// ---------- Driver ----------
+    function DriverPanel({ userId, routes, setRoutes }){
+      const [showForm, setShowForm] = useState(false);
+      const myRoutes = useMemo(()=> routes.filter(r=>r.ownerId===userId), [routes, userId]);
+
+      function createRoute(draft){
+        const r = { ...draft, id: uid(), ownerId: userId };
+        setRoutes(prev => [r, ...prev]);
+        setShowForm(false);
+      }
+
+      return (
+        <section>
+          <HeaderRow title="Driver" subtitle="Offer a route and manage your open slots">
+            <button onClick={()=>setShowForm(true)} className="btn">+ Offer route</button>
+          </HeaderRow>
+
+          <div className="space-y-2">
+            <h3 className="text-sm font-medium text-gray-300">My routes</h3>
+            {myRoutes.length===0 ? <EmptyCard text="No routes yet. Offer your first route."/> : myRoutes.map(r => (
+              <div key={r.id} className="rounded-2xl glass p-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🧭</span>
+                    <h4 className="font-medium">{r.from} → {r.to}</h4>
+                  </div>
+                  <span className="text-[11px] px-2 py-1 rounded-full border bg-white/5 border-white/25">{r.slots} slot{r.slots>1?"s":""}</span>
+                </div>
+                <p className="text-sm text-gray-400 mt-1">🗓️ {fmtRange(r.dateStart, r.dateEnd)} • {r.trailerType} • {r.ramp}</p>
+                {r.notes && <p className="text-sm text-gray-400 mt-1">{r.notes}</p>}
+                <div className="mt-3"><MiniMap start={r.fromLL} end={r.toLL} /></div>
+              </div>
+            ))}
+          </div>
+
+          {showForm && <RouteForm onCancel={()=>setShowForm(false)} onCreate={createRoute} />}
+        </section>
+      );
+    }
+
+    function RouteForm({ onCancel, onCreate }){
+      const [draft, setDraft] = useState(emptyRoute("me"));
+      return (
+        <div className="fixed inset-0 bg-black/50 grid place-items-center p-4" role="dialog" aria-modal="true">
+          <div className="rounded-2xl glass w-full max-w-2xl p-4 space-y-3">
+            <h3 className="font-semibold">Offer new route</h3>
+            <div className="grid grid-cols-1 gap-3">
+              <AddressInput label="Start" value={draft.from} setValue={v=>setDraft({...draft, from:v})} ll={draft.fromLL} setLL={ll=>setDraft({...draft, fromLL: ll})} />
+              <AddressInput label="End" value={draft.to} setValue={v=>setDraft({...draft, to:v})} ll={draft.toLL} setLL={ll=>setDraft({...draft, toLL: ll})} />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="text-sm">Earliest departure
+                  <input type="date" value={draft.dateStart} onChange={e=>setDraft({...draft, dateStart: e.target.value})} className="mt-1 w-full px-3 py-2 rounded-xl glass"/>
+                </label>
+                <label className="text-sm">Latest arrival
+                  <input type="date" value={draft.dateEnd} onChange={e=>setDraft({...draft, dateEnd: e.target.value})} className="mt-1 w-full px-3 py-2 rounded-xl glass"/>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="text-sm">Open slots (stalls)
+                  <input type="number" min={1} value={draft.slots} onChange={e=>setDraft({...draft, slots: Number(e.target.value)})} className="mt-1 w-full px-3 py-2 rounded-xl glass"/>
+                </label>
+                <label className="text-sm">Trailer type
+                  <select value={draft.trailerType} onChange={e=>setDraft({...draft, trailerType: e.target.value})} className="mt-1 w-full px-3 py-2 rounded-xl glass">
+                    {TRAILER_TYPES.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              <label className="text-sm">Ramp
+                <select value={draft.ramp} onChange={e=>setDraft({...draft, ramp: e.target.value})} className="mt-1 w-full px-3 py-2 rounded-xl glass">
+                  {RAMP_OPTIONS.map(t => <option key={t}>{t}</option>)}
+                </select>
+              </label>
+
+              <label className="text-sm">Notes
+                <textarea value={draft.notes} onChange={e=>setDraft({...draft, notes: e.target.value})} rows={3} placeholder="Box-stall only, layover barn, camera monitoring, etc." className="mt-1 w-full px-3 py-2 rounded-xl glass"/>
+              </label>
+
+              <div className="text-sm">
+                <p className="font-medium mb-2">Map (optional): click to drop a start and end marker</p>
+                <RouteMap
+                  start={draft.fromLL} end={draft.toLL}
+                  onChange={(start, end)=>setDraft({...draft, fromLL:start, toLL:end})}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={onCancel} className="btn">Cancel</button>
+              <button onClick={()=>{
+                if(!draft.from.trim() || !draft.to.trim()) { alert("Start and End are required"); return; }
+                if(!draft.dateStart) { alert("Please select dates"); return; }
+                onCreate(draft);
+              }} className="btn">Post route</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ---------- Shared UI ----------
+    function HeaderRow({ title, subtitle, children }){
+      return (
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h2 className="font-semibold text-lg">{title}</h2>
+            <p className="text-xs text-gray-400 -mt-0.5">{subtitle}</p>
+          </div>
+          <div className="flex items-center gap-2">{children}</div>
+        </div>
+      );
+    }
+
+    function EmptyCard({ text }){ return <div className="text-sm text-gray-400 border border-white/10 rounded-xl p-4">{text}</div>; }
+    function Footer(){ return <footer className="max-w-6xl mx-auto px-4 pb-8 pt-6 text-center text-xs text-gray-500">Pony Express V4 — free maps, dark UI. Tell me what to tweak.</footer>; }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App/>);
+  </script>
+</body>
+</html>
