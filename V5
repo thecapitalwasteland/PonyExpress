@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pony Express – Horse & Livestock Hauling</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    :root {
+      --bg: #050816;
+      --bg-alt: #0b1020;
+      --accent: #eab308;
+      --accent-soft: rgba(234, 179, 8, 0.08);
+      --accent-strong: rgba(234, 179, 8, 0.18);
+      --text: #f9fafb;
+      --muted: #9ca3af;
+      --border: #1f2933;
+      --error: #f97373;
+      --success: #22c55e;
+      --card-radius: 18px;
+      --shadow-soft: 0 18px 40px rgba(0,0,0,0.55);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+        "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 0 0, #1d2336 0, #050816 50%, #02010a 100%);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .app-shell {
+      width: 100%;
+      max-width: 1120px;
+      background: linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.98));
+      border-radius: 26px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      box-shadow: var(--shadow-soft);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    header {
+      padding: 20px 24px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+      background: radial-gradient(circle at top left, #1f2937 0, #020617 40%);
+    }
+
+    header-left {
+      display: inline-flex;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .brand-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 20%, #facc15, #eab308, #f97316);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #111827;
+      font-weight: 900;
+      font-size: 22px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.6);
+    }
+
+    .brand-text-main {
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-size: 14px;
+    }
+
+    .brand-text-sub {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .pill {
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(15, 118, 110, 0.15);
+      color: #a5f3fc;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border: 1px solid rgba(45, 212, 191, 0.35);
+      white-space: nowrap;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr);
+      gap: 18px;
+      padding: 12px 18px 18px;
+    }
+
+    @media (max-width: 900px) {
+      main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .hero-card {
+      background: radial-gradient(circle at top, rgba(15, 23, 42, 0.6), #020617 60%);
+      border-radius: var(--card-radius);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      padding: 18px 18px 16px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-badge-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .hero-badge {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .hero-title {
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .hero-highlight {
+      color: #facc15;
+    }
+
+    .hero-subtitle {
+      font-size: 13px;
+      color: var(--muted);
+      max-width: 460px;
+    }
+
+    .hero-metrics {
+      display: flex;
+      gap: 18px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .chip span {
+      color: var(--text);
+      font-weight: 600;
+      font-size: 12px;
+    }
+
+    .mode-toggle {
+      margin-top: 14px;
+      display: inline-flex;
+      border-radius: 999px;
+      padding: 3px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.4);
+    }
+
+    .mode-button {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+    }
+
+    .mode-button span.icon {
+      font-size: 14px;
+    }
+
+    .mode-button.active {
+      background: linear-gradient(135deg, #facc15, #eab308);
+      color: #111827;
+      font-weight: 600;
+      transform: translateY(-0.5px);
+    }
+
+    .mode-button:not(.active):hover {
+      background: rgba(15, 23, 42, 0.9);
+      color: #e5e7eb;
+    }
+
+    .form-card {
+      margin-top: 14px;
+      padding: 14px 14px 12px;
+      border-radius: 16px;
+      background: radial-gradient(circle at top left, rgba(234, 179, 8, 0.1), rgba(15, 23, 42, 0.9));
+      border: 1px solid rgba(234, 179, 8, 0.4);
+    }
+
+    .form-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 10px;
+      gap: 8px;
+    }
+
+    .form-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .form-caption {
+      font-size: 11px;
+      color: #e5e7eb;
+      opacity: 0.85;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    @media (max-width: 700px) {
+      .form-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    label {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    input, textarea, select {
+      border-radius: 9px;
+      padding: 7px 9px;
+      border: 1px solid rgba(148, 163, 184, 0.5);
+      background: rgba(15, 23, 42, 0.92);
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      font-family: inherit;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      border-color: #facc15;
+      box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.5);
+      background: rgba(15, 23, 42, 0.98);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 60px;
+    }
+
+    .form-footer {
+      margin-top: 11px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .primary-btn {
+      border-radius: 999px;
+      border: none;
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      background: linear-gradient(135deg, #facc15, #f97316);
+      color: #111827;
+      box-shadow: 0 10px 20px rgba(249, 115, 22, 0.35);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .primary-btn:hover {
+      filter: brightness(1.05);
+    }
+
+    .primary-btn:active {
+      transform: translateY(1px);
+      box-shadow: 0 5px 12px rgba(0, 0, 0, 0.8);
+    }
+
+    .subtext {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .status-message {
+      font-size: 12px;
+      margin-top: 6px;
+    }
+
+    .status-success {
+      color: var(--success);
+    }
+
+    .status-error {
+      color: var(--error);
+    }
+
+    /* Right column panels */
+    .right-column {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .panel {
+      border-radius: var(--card-radius);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: radial-gradient(circle at top left, rgba(148, 163, 184, 0.15), rgba(15, 23, 42, 0.96));
+      padding: 14px 14px 10px;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.9);
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      gap: 8px;
+    }
+
+    .panel-title {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .panel-tag {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-radius: 999px;
+      padding: 4px 9px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.55);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .request-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 260px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+
+    .request-card {
+      border-radius: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.5);
+      background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.8), rgba(15, 23, 42, 0.98));
+      padding: 8px 9px;
+      font-size: 12px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.8fr) minmax(0, 1.1fr);
+      gap: 6px;
+    }
+
+    @media (max-width: 700px) {
+      .request-card {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .req-route {
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+
+    .req-meta {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .req-badge-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+
+    .req-badge {
+      font-size: 10px;
+      border-radius: 999px;
+      padding: 3px 7px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.5);
+    }
+
+    .req-status-pill {
+      font-size: 10px;
+      border-radius: 999px;
+      padding: 3px 7px;
+      background: rgba(234, 179, 8, 0.16);
+      border: 1px solid rgba(234, 179, 8, 0.8);
+      color: #facc15;
+    }
+
+    .req-notes {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .req-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .ghost-btn {
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.6);
+      background: transparent;
+      color: var(--muted);
+      padding: 4px 9px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .ghost-btn:hover {
+      background: rgba(15, 23, 42, 0.9);
+      color: #e5e7eb;
+    }
+
+    .small-pill {
+      font-size: 10px;
+      color: var(--muted);
+      background: rgba(15, 23, 42, 0.9);
+      border-radius: 999px;
+      padding: 3px 7px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid rgba(148, 163, 184, 0.5);
+    }
+
+    footer {
+      padding: 10px 18px 14px;
+      border-top: 1px solid rgba(148, 163, 184, 0.25);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--muted);
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .link {
+      color: #eab308;
+      text-decoration: none;
+    }
+    .link:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header>
+      <div class="brand">
+        <div class="brand-icon">🐴</div>
+        <div>
+          <div class="brand-text-main">PONY EXPRESS</div>
+          <div class="brand-text-sub">Horse & Livestock Hauling Network (MVP)</div>
+        </div>
+      </div>
+      <div class="pill">Pre-alpha · Concept Demo Only</div>
+    </header>
+
+    <main>
+      <!-- LEFT: Mode + Form -->
+      <section class="hero-card">
+        <div class="hero-badge-row">
+          <div class="hero-badge">Built for horse people · Owner ↔ Hauler marketplace</div>
+          <div class="small-pill">
+            <span>Demo</span> · <span id="requestCount">0</span> requests
+          </div>
+        </div>
+
+        <div class="hero-title">
+          Match <span class="hero-highlight">trusted haulers</span> with horses that need a ride.
+        </div>
+        <div class="hero-subtitle">
+          This is a local-only prototype. Requests are stored in your browser only. No real bookings, payments, or messages yet.
+        </div>
+
+        <div class="hero-metrics">
+          <div class="chip">
+            <span>Rider</span> • create haul requests
+          </div>
+          <div class="chip">
+            <span>Hauler</span> • browse jobs & “quote”
+          </div>
+        </div>
+
+        <div class="mode-toggle" id="modeToggle">
+          <button class="mode-button active" data-mode="rider">
+            <span class="icon">👤</span>
+            Rider view
+          </button>
+          <button class="mode-button" data-mode="hauler">
+            <span class="icon">🚚</span>
+            Hauler view
+          </button>
+        </div>
+
+        <!-- Rider Form -->
+        <div class="form-card" id="riderFormCard">
+          <div class="form-header">
+            <div class="form-title">Request a haul</div>
+            <div class="form-caption">
+              Enter pickup/dropoff, window, and horse details. We’ll treat each entry as a new “open request”.
+            </div>
+          </div>
+
+          <form id="haulForm">
+            <div class="form-grid">
+              <div class="field">
+                <label for="pickup">Pickup location</label>
+                <input id="pickup" required placeholder="e.g. Round Top, TX" />
+              </div>
+              <div class="field">
+                <label for="dropoff">Dropoff location</label>
+                <input id="dropoff" required placeholder="e.g. Tulsa, OK" />
+              </div>
+              <div class="field">
+                <label for="date">Date / time window</label>
+                <input id="date" placeholder="e.g. Dec 12–13 · flexible AM" />
+              </div>
+              <div class="field">
+                <label for="horses">Number of horses</label>
+                <input id="horses" type="number" min="1" value="1" />
+              </div>
+              <div class="field">
+                <label for="special">Horse notes / special needs</label>
+                <textarea id="special" placeholder="Loads slow, prefers box stall, doesn’t tie well…"></textarea>
+              </div>
+              <div class="field">
+                <label for="contact">Contact name (optional, demo)</label>
+                <input id="contact" placeholder="e.g. Jessi" />
+              </div>
+            </div>
+
+            <div class="form-footer">
+              <button type="submit" class="primary-btn">
+                Create haul request
+                <span>➜</span>
+              </button>
+              <div class="subtext">
+                Stored locally only. You can refresh to keep testing without affecting anything live.
+              </div>
+            </div>
+          </form>
+          <div id="formStatus" class="status-message"></div>
+        </div>
+
+        <!-- Hauler instructions (shown in hauler mode) -->
+        <div class="form-card" id="haulerInfoCard" style="display: none;">
+          <div class="form-header">
+            <div class="form-title">Browse nearby haul requests</div>
+            <div class="form-caption">
+              In a real app, we’d filter by your base location, radius, and lanes. Here we show all demo requests.
+            </div>
+          </div>
+          <div class="subtext">
+            Use the panel on the right to mark jobs as “Quoted” or “Booked”. This is just mock state in your browser.
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT: Lists -->
+      <section class="right-column">
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title" id="panelTitle">Open requests (Rider view)</div>
+            <div class="panel-tag" id="panelTag">Local demo only</div>
+          </div>
+          <div id="emptyState" class="subtext">
+            No haul requests yet. Use the form on the left to create one.
+          </div>
+          <div class="request-list" id="requestList"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div class="panel-title">Status legend</div>
+            <div class="panel-tag">Mock workflow</div>
+          </div>
+          <div class="subtext">
+            <p><strong>Open</strong> – freshly created rider request, no hauler attached.</p>
+            <p><strong>Quoted (hauler)</strong> – hauler has expressed interest (in a real app, this would include price & notes).</p>
+            <p><strong>Booked</strong> – rider accepted a quote; the job is assigned to a hauler and moves into trip-tracking.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div>🚧 Pony Express MVP sandbox · Nothing here is live or binding.</div>
+      <div>Code hosted on <a class="link" href="https://github.com/thecapitalwasteland/PonyExpress" target="_blank" rel="noopener noreferrer">GitHub</a>.</div>
+    </footer>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "ponyExpressDemoRequests";
+
+    function loadRequests() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function saveRequests(reqs) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(reqs));
+    }
+
+    function renderRequests(mode) {
+      const listEl = document.getElementById("requestList");
+      const emptyStateEl = document.getElementById("emptyState");
+      const countEl = document.getElementById("requestCount");
+
+      const panelTitle = document.getElementById("panelTitle");
+      const panelTag = document.getElementById("panelTag");
+
+      const requests = loadRequests();
+
+      countEl.textContent = requests.length.toString();
+
+      if (mode === "rider") {
+        panelTitle.textContent = "Your haul requests (Rider view)";
+        panelTag.textContent = "You see everything you’ve created";
+      } else {
+        panelTitle.textContent = "Available jobs (Hauler view)";
+        panelTag.textContent = "In a real app, filtered by your lane";
+      }
+
+      listEl.innerHTML = "";
+
+      if (!requests.length) {
+        emptyStateEl.style.display = "block";
+        return;
+      }
+
+      emptyStateEl.style.display = "none";
+
+      requests.forEach((req, idx) => {
+        const card = document.createElement("div");
+        card.className = "request-card";
+
+        const left = document.createElement("div");
+        const route = document.createElement("div");
+        route.className = "req-route";
+        route.textContent = req.pickup + " → " + req.dropoff;
+
+        const meta = document.createElement("div");
+        meta.className = "req-meta";
+        meta.textContent =
+          (req.date || "Flexible window") +
+          " · " +
+          (req.horses || "1") +
+          (req.horses === "1" ? " horse" : " horses");
+
+        const badgesRow = document.createElement("div");
+        badgesRow.className = "req-badge-row";
+
+        const openBadge = document.createElement("span");
+        openBadge.className = "req-status-pill";
+        openBadge.textContent = req.status || "Open";
+
+        badgesRow.appendChild(openBadge);
+
+        if (req.contact) {
+          const contactBadge = document.createElement("span");
+          contactBadge.className = "req-badge";
+          contactBadge.textContent = "Rider: " + req.contact;
+          badgesRow.appendChild(contactBadge);
+        }
+
+        const notes = document.createElement("div");
+        notes.className = "req-notes";
+        notes.textContent = req.special || "No special notes added.";
+
+        left.appendChild(route);
+        left.appendChild(meta);
+        left.appendChild(badgesRow);
+        left.appendChild(notes);
+
+        const right = document.createElement("div");
+        right.className = "req-actions";
+
+        // In rider mode, allow “reset to open” & “delete”
+        if (mode === "rider") {
+          const resetBtn = document.createElement("button");
+          resetBtn.className = "ghost-btn";
+          resetBtn.textContent = "Set as Open";
+          resetBtn.onclick = () => {
+            const updated = loadRequests();
+            if (updated[idx]) {
+              updated[idx].status = "Open";
+              saveRequests(updated);
+              renderRequests("rider");
+            }
+          };
+
+          const deleteBtn = document.createElement("button");
+          deleteBtn.className = "ghost-btn";
+          deleteBtn.textContent = "Delete";
+          deleteBtn.onclick = () => {
+            const updated = loadRequests();
+            updated.splice(idx, 1);
+            saveRequests(updated);
+            renderRequests("rider");
+          };
+
+          right.appendChild(resetBtn);
+          right.appendChild(deleteBtn);
+        } else {
+          // Hauler mode: “Quote” and “Mark booked”
+          const quoteBtn = document.createElement("button");
+          quoteBtn.className = "ghost-btn";
+          quoteBtn.textContent = "Mark as quoted";
+          quoteBtn.onclick = () => {
+            const updated = loadRequests();
+            if (updated[idx]) {
+              updated[idx].status = "Quoted (hauler)";
+              saveRequests(updated);
+              renderRequests("hauler");
+            }
+          };
+
+          const bookBtn = document.createElement("button");
+          bookBtn.className = "ghost-btn";
+          bookBtn.textContent = "Mark as booked";
+          bookBtn.onclick = () => {
+            const updated = loadRequests();
+            if (updated[idx]) {
+              updated[idx].status = "Booked";
+              saveRequests(updated);
+              renderRequests("hauler");
+            }
+          };
+
+          right.appendChild(quoteBtn);
+          right.appendChild(bookBtn);
+        }
+
+        card.appendChild(left);
+        card.appendChild(right);
+        listEl.appendChild(card);
+      });
+    }
+
+    function setMode(mode) {
+      const buttons = document.querySelectorAll(".mode-button");
+      buttons.forEach((btn) => {
+        if (btn.dataset.mode === mode) {
+          btn.classList.add("active");
+        } else {
+          btn.classList.remove("active");
+        }
+      });
+
+      const riderFormCard = document.getElementById("riderFormCard");
+      const haulerInfoCard = document.getElementById("haulerInfoCard");
+
+      if (mode === "rider") {
+        riderFormCard.style.display = "block";
+        haulerInfoCard.style.display = "none";
+      } else {
+        riderFormCard.style.display = "none";
+        haulerInfoCard.style.display = "block";
+      }
+
+      renderRequests(mode);
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      const form = document.getElementById("haulForm");
+      const statusEl = document.getElementById("formStatus");
+      const modeToggle = document.getElementById("modeToggle");
+
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        statusEl.textContent = "";
+        statusEl.className = "status-message";
+
+        const pickup = document.getElementById("pickup").value.trim();
+        const dropoff = document.getElementById("dropoff").value.trim();
+        const date = document.getElementById("date").value.trim();
+        const horses = document.getElementById("horses").value.trim();
+        const special = document.getElementById("special").value.trim();
+        const contact = document.getElementById("contact").value.trim();
+
+        if (!pickup || !dropoff) {
+          statusEl.textContent = "Pickup and dropoff are required.";
+          statusEl.classList.add("status-error");
+          return;
+        }
+
+        const newReq = {
+          pickup,
+          dropoff,
+          date,
+          horses: horses || "1",
+          special,
+          contact,
+          status: "Open",
+          createdAt: new Date().toISOString()
+        };
+
+        const current = loadRequests();
+        current.unshift(newReq);
+        saveRequests(current);
+
+        form.reset();
+        document.getElementById("horses").value = "1";
+
+        statusEl.textContent = "Request created (demo only, stored in your browser).";
+        statusEl.classList.add("status-success");
+
+        renderRequests("rider");
+      });
+
+      modeToggle.addEventListener("click", (e) => {
+        const target = e.target.closest(".mode-button");
+        if (!target) return;
+        const newMode = target.dataset.mode;
+        if (!newMode) return;
+        setMode(newMode);
+      });
+
+      // initial
+      setMode("rider");
+    });
+  </script>
+</body>
+</html>
